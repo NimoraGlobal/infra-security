@@ -1,0 +1,135 @@
+name: CI — Security & Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+      - "release/*"
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Gate 1: Dependency Review ────────────────────────────────────────────
+  dependency-review:
+    name: 📦 Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-3.0, AGPL-3.0
+          comment-summary-in-pr: always
+
+  # ─── Gate 2: Terraform Lint & Validate ────────────────────────────────────
+  tf-lint:
+    name: 🔍 Terraform Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Terraform Init (no backend)
+        run: cd terraform && terraform init -backend=false
+
+      - name: Terraform Validate
+        run: cd terraform && terraform validate
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive terraform/
+
+      - uses: terraform-linters/setup-tflint@v4
+
+      - name: TFLint Init
+        run: cd terraform && tflint --init
+
+      - name: TFLint
+        run: cd terraform && tflint --recursive
+
+  # ─── Gate 3: Ansible Lint ─────────────────────────────────────────────────
+  ansible-lint:
+    name: 🔍 Ansible Lint
+    runs-on: ubuntu-latest
+    if: hashFiles('ansible/**') != ''    # skip repos without ansible/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible + ansible-lint
+        run: pip install ansible ansible-lint
+
+      - name: Run ansible-lint
+        run: ansible-lint ansible/
+
+  # ─── Phase 2 stubs (uncomment when PoC is complete) ───────────────────────
+  # Uncomment each block and add the job name to ci-gate's needs[] list
+
+  # iac-checkov:
+  #   name: 🔒 Checkov — IaC Misconfig Scan
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.12"
+  #     - run: pip install checkov
+  #     - run: checkov -d terraform/ --framework terraform --quiet --compact
+
+  # iac-tfsec:
+  #   name: 🔒 tfsec — IaC Security Scan
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: aquasecurity/tfsec-action@v1.0.0
+  #       with:
+  #         working_directory: terraform/
+
+  # opa-policy:
+  #   name: 🏛️ OPA — Policy Compliance
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: |
+  #         curl -L -o /usr/local/bin/conftest https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64
+  #         chmod +x /usr/local/bin/conftest
+  #     - run: conftest test terraform/ --policy policies/terraform/
+
+  # ─── Final Gate: All gates must pass ──────────────────────────────────────
+  ci-gate:
+    name: ✅ CI Gate
+    needs:
+      - dependency-review
+      - tf-lint
+      - ansible-lint
+      # Add phase 2 jobs here when uncommented:
+      # - iac-checkov
+      # - iac-tfsec
+      # - opa-policy
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Evaluate all gates
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "Gate results: $results"
+          if [[ "$results" == *"failure"* || "$results" == *"cancelled"* ]]; then
+            echo "❌ CI gate failed — one or more checks did not pass"
+            exit 1
+          fi
+          echo "✅ All CI gates passed"
