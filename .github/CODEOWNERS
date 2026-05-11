@@ -1,0 +1,13 @@
+# CODEOWNERS — infra-security
+# Copy this file to: .github/CODEOWNERS in the infra-security repo
+
+# Security engineers own everything in this repo
+/                          @nimora-global/security-engineers
+
+# Policy files affecting prod gates — principals must co-sign
+/policies/terraform/       @nimora-global/security-engineers @nimora-global/principal-infra-engineers
+/policies/github/          @nimora-global/security-engineers @nimora-global/principal-infra-engineers
+
+# Pipelines — security + principals co-own
+/.github/workflows/        @nimora-global/security-engineers @nimora-global/principal-infra-engineers
+/.github/CODEOWNERS        @nimora-global/security-engineers @nimora-global/principal-infra-engineers
